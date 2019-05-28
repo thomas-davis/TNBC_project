@@ -1,0 +1,83 @@
+```{r "setup", include=FALSE}
+require("knitr")
+opts_knit$set(root.dir ="C:\\Users\\thoma\\Desktop\\TNBC_project\\datasets\\TCGA_data\\fig_8")
+source("common_functions.R")
+knitr::opts_chunk$set(fig.width=13.9, fig.height=10.9, message=FALSE, warning = FALSE) 
+```
+
+
+<br><br><br><br><br><br>
+##Subplot A -- PDL1 expression our dataset
+***
+```{r}
+setwd(our_datasets)
+subplot_A_df <-read.csv("8A_expression.csv", header=FALSE)
+colnames(subplot_A_df) <- c("subtype", "expression")
+
+subplot_A <- subplot_A_df %>% ggplot(aes(x=subtype, y=expression, fill=subtype))+
+  geom_boxplot()+geom_point()+
+  theme(legend.position = "none")+
+  labs(x="Subtype", y="Expression (TPM)")
+subplot_A <- my_theme_without_x(subplot_A)+theme(axis.text.x=element_text(angle=0))
+subplot_A
+```
+
+
+```{r}
+setwd(TCGA_datasets)
+pdl1_expression <- read.table("8BC_PDL-1_expression.csv", stringsAsFactors = FALSE, skip=1) 
+pdl1_expression <- tidyr::separate(pdl1_expression, sep='\t', col=1, into=c("id", "disease", "expression", "gene"))
+
+pdl1_expression <- pdl1_expression %>% dplyr::select(id, disease, expression) %>% mutate(expression=log2(as.numeric(expression)+1))
+
+pdl1_breast <- pdl1_expression %>% filter(disease=="BRCA")
+pdl1_ovarian <- pdl1_expression %>% filter(disease=="OV")
+
+pdl1_breast <- add_subtypes_breast_cbioportal(pdl1_breast)
+pdl1_ovarian <- add_subtypes_ovarian(pdl1_ovarian)
+```
+
+
+<br><br><br><br><br><br>
+##Subplot B -- PDL1 expression TCGA TNBC
+***
+```{r}
+
+subplot_B <- pdl1_breast %>% filter(!is.na(TNBCtype_seperated), !(TNBCtype_seperated %in% c("HER2", "ER"))) %>% ggplot(aes(x=TNBCtype_seperated, y=expression, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  theme(legend.position = "none")+
+  labs(x="Subtype", y="Expression Log(TPM+1)")
+subplot_B <- my_theme_without_x(subplot_B)
+subplot_B
+```
+
+<br><br><br><br><br><br>
+##Subplot B -- PDL1 expression TCGA OV
+***
+```{r}
+subplot_C <- pdl1_ovarian %>% ggplot(aes(x=SUBTYPE, y=expression, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  theme(legend.position = "none")+
+  labs(x="Subtype", y="Expression Log(TPM+1)")
+subplot_C <- my_theme_without_x(subplot_C)
+subplot_C
+
+```
+
+```{r}
+graphs <- list(subplot_A, subplot_B, subplot_C)
+save_plot_list(graphs)
+```
+
+
+For cowplot version: 
+```{r}
+# 
+# setwd(FIGURE_IMAGE_WD)
+# 
+# ABC <- cowplot::plot_grid(subplot_A, subplot_B, subplot_C, labels=c("A","B", "C"), nrow=1, label_size=LABELSIZE, scale=COWPLOT_SCALE, rel_widths = c(.7,1.3,1))
+# cowplot::save_plot("fig8.png", ABC, base_height = 18, base_width = 40)
+
+
+
+```

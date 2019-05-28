@@ -1,0 +1,132 @@
+---
+title: "Figure 6"
+author: "Tom Davis"
+date: "March 14, 2019"
+output: html_document
+---
+
+```{r "setup", include=FALSE}
+require("knitr")
+opts_knit$set(root.dir ="C:\\Users\\thoma\\Desktop\\TNBC_project\\datasets\\TCGA_data")
+source("common_functions.R")
+knitr::opts_chunk$set(fig.width=13.9, fig.height=10.9, message=FALSE, warning = FALSE) 
+HLINE_SIZE <- 1.1
+
+```
+
+<br><br><br><br><br><br>
+##Subplot A -- HRD for all tumor types TCGA
+***
+```{r}
+cibersort_data <- read.csv("5EH_cibersort_data.csv") %>% dplyr::select(Homologous.Recombination.Defects, TCGA.Study) %>% na.omit()
+
+
+sorted_cibersort_data <- cibersort_data %>% group_by(TCGA.Study) %>% summarize(meanHR=median(Homologous.Recombination.Defects)) %>% arrange(meanHR)
+
+cibersort_data <- cibersort_data %>% mutate(TCGA.Study=factor(TCGA.Study, levels=sorted_cibersort_data$TCGA.Study))
+
+cibersort_data <- cibersort_data %>% arrange(TCGA.Study)
+
+breast <- cibersort_data %>% filter(TCGA.Study=="BRCA")
+OV <- cibersort_data %>% filter(TCGA.Study=="OV")
+
+A_plot <- cibersort_data %>% ggplot(aes(x=TCGA.Study, y=Homologous.Recombination.Defects)) +geom_boxplot(fill="#7CAE00",outlier.shape = NA)+geom_jitter(size=.1, width =.1)+
+  geom_hline(yintercept = median(breast$Homologous.Recombination.Defects, na.rm = TRUE), linetype = 2, size=HLINE_SIZE)+
+  geom_hline(yintercept = median(OV$Homologous.Recombination.Defects, na.rm = TRUE), linetype = 2, size=HLINE_SIZE)+
+  xlab("")+ylab("HR defects")+
+  theme(axis.text = element_text(face="bold",size=40, color="black"), axis.text.x = element_text(face="bold",size=30, color="black"), plot.title = element_text(size = 35, face = "bold"), axis.title.y.left = element_text(face="bold",size=40, color="black"))+
+  scale_y_continuous(limits = c(0,100), breaks = seq(0,100, by=10))
+
+
+A_plot
+
+```
+
+##load datasets
+
+```{r}
+setwd(TCGA_datasets)
+cibersort <- read.csv("5EH_cibersort_data.csv", stringsAsFactors = FALSE) %>% dplyr::select(TCGA.Participant.Barcode,TCGA.Study, Homologous.Recombination.Defects)
+
+cibersort_breast <- cibersort %>% filter(TCGA.Study=="BRCA")
+
+cibersort_ovarian <- cibersort %>% filter(TCGA.Study=="OV")
+
+cibersort_breast <- add_subtypes_breast_cbioportal(cibersort_breast,1)
+
+cibersort_ovarian <- add_subtypes_ovarian(cibersort_ovarian, 1)
+```
+
+<br><br><br><br><br><br>
+##Subplot B -- HRD by subtype for TCGA TNBC
+***
+```{r}
+
+setwd(TCGA_datasets)
+
+
+
+breast_plot <- cibersort_breast %>% filter(!is.na(TNBCtype_seperated)) %>%
+  ggplot(aes(x=TNBCtype_seperated, y=Homologous.Recombination.Defects,fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = median(breast$Homologous.Recombination.Defects, na.rm = TRUE), linetype = 2, size=HLINE_SIZE)+
+  geom_hline(yintercept = median(OV$Homologous.Recombination.Defects, na.rm = TRUE),linetype = 2, size=HLINE_SIZE)+
+  labs(x="Subtype", y="HR defects", fill="Subtype")+
+  scale_y_continuous(limits = c(0,100), breaks = seq(0,100, by=10))
+
+breast_plot <- my_theme_without_x(breast_plot)
+breast_plot
+```
+
+
+<br><br><br><br><br><br>
+##Subplot C -- HRD by subtype for TCGA OV
+***
+
+```{r}
+
+ovarian_plot <- cibersort_ovarian %>% filter(!is.na(SUBTYPE), !is.na(Homologous.Recombination.Defects)) %>% 
+  ggplot(aes(x=SUBTYPE, y=Homologous.Recombination.Defects, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = median(OV$Homologous.Recombination.Defects, na.rm = TRUE), linetype = 2, size=HLINE_SIZE)+
+  labs(x="Subtype",y="HR defects",fill="Subtype")+
+  scale_y_continuous(limits = c(0,100), breaks = seq(0,100, by=10))
+
+ovarian_plot <- my_theme_without_x(ovarian_plot)
+ovarian_plot 
+```
+
+
+<br><br><br><br><br><br>
+##Subplot D -- HRD by sensitivity for TCGA OV
+***
+
+```{r}
+getwd()
+sens <- read.csv("6C_ovarian_sensitivity.csv")
+sens_plot <- sens %>% 
+  ggplot(aes(x=Sensitive, y=Homologous.Recombination.Defects, fill=Sensitive))+
+  geom_boxplot()+
+  labs(x="", y="HR defects", fill='')+
+  stat_compare_means(size=14,label.x=.8, label.y=100)+
+  scale_fill_manual(values=c("#4f5cc6","#d3d8ff"))+
+  geom_hline(yintercept = median(OV$Homologous.Recombination.Defects, na.rm = TRUE), linetype = 2, size=HLINE_SIZE)+
+  scale_y_continuous(limits = c(0,100), breaks = seq(0,100, by=10))
+
+sens_plot <- my_theme(sens_plot)
+sens_plot <- sens_plot+geom_point()+theme(axis.text.x=element_text(angle=0))
+sens_plot
+```
+
+  
+```{r}
+A <- list(A_plot)
+BCD <- list(A_plot, breast_plot, ovarian_plot, sens_plot)
+
+save_plot_list(BCD)
+save_plot_list(A, set_width = 44)
+
+```
+
+
+

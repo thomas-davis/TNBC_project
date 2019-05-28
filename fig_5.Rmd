@@ -1,0 +1,281 @@
+---
+title: "Figure 5"
+author: "Tom Davis"
+date: "March 14, 2019"
+output: html_document
+---
+
+```{r "setup", include=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "C:\\Users\\thoma\\Desktop\\TNBC_project\\datasets\\TCGA_data")
+knitr::opts_chunk$set(fig.width=13.9, fig.height=10.9, message=FALSE, warning = FALSE) 
+source("common_functions.R")
+
+```
+<br><br><br><br><br><br>
+
+
+
+##subplot A-- TMB our dataset
+***
+
+data backed up on Xanadu
+```{r}
+
+setwd(our_datasets)
+
+snps   <- read_mutation_df("5A_snp.txt", "snps")
+indels <- read_mutation_df("5A_indel.txt", "indels")
+
+combined <- full_join(snps, indels)
+combined <- add_subtype_our_dataset(combined)
+combined <- combined %>% mutate(total=snps+indels)
+
+combined<- combined %>% filter(V2 != "unknown") 
+g <- combined  %>% ggplot(aes(x=V4, y=total, fill=V4))+geom_boxplot()+geom_point()+ylab("Somatic Mutation Count ")+xlab("Germline Mutation Status")+stat_compare_means(label.x=1.38, size=STAT_COMPARE_SIZE-5)+coord_cartesian(ylim=c(0,1150))
+
+subplot_A <- my_theme_without_x(g)+theme(axis.text.x=element_text(angle=0))
+subplot_A
+```
+
+<br><br><br><br><br><br>
+
+##subplot B-- immune expression our dataset
+***
+
+expression data was taken from corrected matrix sent by email from ewa on dec 7th 2018
+```{r}
+setwd(our_datasets)
+
+expression <- read.csv("5B_expression_corrected.csv", stringsAsFactors = FALSE,header = TRUE)
+
+
+immune_averages <- colMeans(expression[,3:ncol(expression)], na.rm = TRUE) %>% as.data.frame() %>% rownames_to_column()
+colnames(immune_averages) <- c("sample", "expression")
+immune_with_subtype <- immune_averages %>% mutate(carrier_oneletter=substr(sample,3,3)) %>% filter(carrier_oneletter %in% c("C","N"))
+immune_with_subtype <- immune_with_subtype %>% mutate(carrier= ifelse(carrier_oneletter=="C","carrier","noncarrier"))
+
+breast <- immune_with_subtype[(grep("B", immune_with_subtype$sample)),]
+ovarian <- immune_with_subtype[(grep("O", immune_with_subtype$sample)),]
+breast_plot <- breast %>% ggplot(aes(x=carrier, y=expression, fill=carrier))+geom_boxplot()+geom_point()+xlab("BRCA status")+stat_compare_means( label.x=1,size=7)+ylab("Average Immune Expression (TPM)")
+
+ovarian_plot <- ovarian %>% ggplot(aes(x=carrier, y=expression, fill=carrier))+geom_boxplot()+geom_point()+xlab("BRCA status")+stat_compare_means(label.x=1.5,size=7)+ylab("Average Immune Expression (TPM)")
+
+g <- immune_with_subtype  %>% ggplot(aes(x=carrier, y=expression, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  labs(x="Germine Mutation Status", y="Immune Expression (TPM)", fill="Germine Mutation Status")+
+  stat_compare_means(label.x=.8, size=STAT_COMPARE_SIZE-5)
+
+subplot_B <- my_theme_without_x(g)+theme(axis.text.x=element_text(angle=0))
+subplot_B
+```
+
+<br><br><br><br><br><br>
+
+##subplot C-- TMB for TCGA TNBC
+***
+Data from [TCIA](https://tcia.at/neoantigens)
+```{r}
+setwd(TCGA_datasets)
+
+TMB <- read.table("5C_TCIA_mutations.csv",header=TRUE, stringsAsFactors = FALSE, sep="\t", skip=7)
+TMB <- add_subtypes_breast_cbioportal(TMB, 1)
+TMB <- TMB %>% filter(!(is.na(TNBCtype_seperated)))
+#only want TNBC with subtype information
+
+g <- TMB %>% 
+  ggplot(aes(x=TNBCtype_seperated, y=Mutations, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = median(TMB$Mutations, na.rm = TRUE),color="black", linetype = 2, size=HLINE_SIZE)+
+  theme_classic()+coord_cartesian(ylim=c(1,170))+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", label.y=170, size=STAT_COMPARE_SIZE,  hide.ns = TRUE)+
+  labs(fill="Subtype", x="Subtype", y="Somatic Mutation Count")
+
+subplot_C <- my_theme_without_x(g)
+subplot_C
+```
+
+<br><br><br><br><br><br>
+
+##subplot D -- immune Expression by subtype for TCGA TNBC
+
+expression taken from [Firebrowse](http://firebrowse.org/) 
+TODO: this code needs refactoring. Its old and crusty. 
+
+***
+
+```{r}
+setwd(TCGA_datasets)
+
+con <- file("5D_immune_breast.txt","r")
+first_line <- readLines(con,n=1) %>% strsplit("\t") %>% unlist()
+close(con)
+expression <- read.table("5D_immune_breast.txt", stringsAsFactors = FALSE, skip=1)
+colnames(expression) <- first_line
+
+expression[,2:ncol(expression)] <- apply(expression[,2:ncol(expression)],2, function(x) log2(x+1))
+expression_means <- colMeans(expression[,2:ncol(expression)]) %>% as.data.frame()
+#log2 transform RSEM normalized counts, and find mean of expression by sample
+expression_means <- rownames_to_column(expression_means)
+colnames(expression_means) <- c("sample", "expression")
+
+expression_means <- add_subtypes_breast_cbioportal(expression_means,1)
+
+expression_means <- expression_means %>% filter(!is.na(TNBCtype_seperated))
+
+g <- expression_means %>% 
+  ggplot(aes(x=TNBCtype_seperated, y=expression, fill=carrier))+
+  geom_boxplot()+geom_point(aes(x=TNBCtype_seperated, y=expression))+
+  geom_hline(yintercept = mean(expression_means$expression),color="black", linetype = 2, size=HLINE_SIZE)+
+  labs(x="Subtype", y="Immune Expression (norm. counts)")+
+  theme_classic()+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", label.y=8.8, size=STAT_COMPARE_SIZE, hide.ns = TRUE)
+subplot_D <- my_theme_without_x(g)
+subplot_D
+```
+<br><br><br><br><br><br>
+
+##subplot E-- LF by subtype for TCGA TNBC
+
+Dataset from supplementary table of [The Immune Landscape of Cancer](https://www.ncbi.nlm.nih.gov/pubmed/29628290)
+
+***
+
+```{r}
+setwd(TCGA_datasets)
+
+cibersort <- read.csv("5EH_cibersort_data.csv", stringsAsFactors = FALSE)
+cibersort <- cibersort %>% filter(TCGA.Study=="BRCA") %>% dplyr::select(TCGA.Participant.Barcode
+,Leukocyte.Fraction)
+
+cibersort <- add_subtypes_breast_cbioportal(cibersort,1)
+
+
+
+subplot_E <- cibersort %>% filter(!is.na(TNBCtype_seperated)) %>% 
+  ggplot(aes(x=TNBCtype_seperated,y=Leukocyte.Fraction, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = mean(cibersort$Leukocyte.Fraction, na.rm = TRUE),color="black", linetype = 2, size=HLINE_SIZE)+
+    labs(x="Subtype", y="Leukocyte Fraction")+
+  theme_classic()+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", size=STAT_COMPARE_SIZE,  hide.ns = TRUE)
+
+
+subplot_E <- my_theme_without_x(subplot_E)
+subplot_E
+```
+
+<br><br><br><br><br><br>
+
+##subplot F-- TMB ovarian TCGA OV 
+
+Data from [TCIA](https://tcia.at/neoantigens)
+***
+
+```{r}
+setwd(TCGA_datasets)
+
+OV <- read.table("5F_TCIA_mutations_OV.csv", sep="\t", skip=7, header=TRUE, stringsAsFactors = FALSE)
+OV <- add_subtypes_ovarian(OV, 1) 
+
+OV_TMB <- OV %>% ggplot(aes(x=SUBTYPE, y=Mutations, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = median(TMB$Mutations, na.rm = TRUE),color="black", linetype = 2, size=HLINE_SIZE)+
+  labs(fill="Subtype", x="Subtype", y="Somatic Mutation Count")+
+  theme_classic()+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", size=STAT_COMPARE_SIZE,  hide.ns = TRUE)
+subplot_F <- my_theme_without_x(OV_TMB)
+subplot_F
+```
+
+<br><br><br><br><br><br>
+
+##subplot G-- immune expression by subtype for TCGA OV 
+Data from [firebrowse](http://firebrowse.org/) downloaded from [xena](https://xena.ucsc.edu/)
+
+***
+
+```{r}
+setwd(TCGA_datasets)
+con <- file("5G_immune_ovarian.tsv","r")
+first_line <- readLines(con,n=1) %>% strsplit("\t") %>% unlist()
+close(con)
+ovarian <- read.table("5G_immune_ovarian.tsv", sep="\t", skip=1, stringsAsFactors = FALSE)
+colnames(ovarian) <- first_line
+ovarian<- ovarian %>% dplyr::select(-contains("unknown"))
+ovarian_rowmeans <- data.frame(ID=ovarian[,1], expression=rowMeans(ovarian[,2:ncol(ovarian)]), stringsAsFactors = FALSE)
+
+ovarian_rowmeans<- ovarian_rowmeans %>% filter(substr(ID, 14,15)=="01") %>%        mutate(ID=substr(ID, 1,12))
+
+ovarian_rowmeans <- add_subtypes_ovarian(ovarian_rowmeans, 1) %>% na.omit()
+
+ovarian_rowmeans_plot <- ovarian_rowmeans %>% 
+  ggplot(aes(x=SUBTYPE,y=expression, fill=carrier))+
+  geom_boxplot()+geom_point()+
+  geom_hline(yintercept = mean(ovarian_rowmeans$expression),color="black", linetype = 2, size=HLINE_SIZE)+
+  theme_classic()+
+  labs(x="Subtype", y="Immune Expression (norm. counts)")+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", label.y=8.5, size=STAT_COMPARE_SIZE,  hide.ns = TRUE)
+subplot_G<- my_theme_without_x(ovarian_rowmeans_plot)
+subplot_G
+
+```
+
+<br><br><br><br><br><br>
+
+##subplot H-- LF by subtype for TCGA OV
+
+Dataset from supplementary table of [The Immune Landscape of Cancer](https://www.ncbi.nlm.nih.gov/pubmed/29628290)
+
+***
+
+```{r}
+setwd(TCGA_datasets)
+cibersort <- read.csv("5EH_cibersort_data.csv", stringsAsFactors = FALSE)
+ovarian <- cibersort %>% filter(TCGA.Study=="OV")
+ovarian <- add_subtypes_ovarian(ovarian, 1)
+
+ov_LF <-  ovarian %>% dplyr::select(ID, carrier, Leukocyte.Fraction, SUBTYPE) %>% na.omit()
+
+ov_LF_plot <- ov_LF %>% 
+  ggplot(aes(x=SUBTYPE,y=Leukocyte.Fraction, fill=carrier))+
+  geom_boxplot()+geom_point()+geom_hline(yintercept = mean(ovarian$Leukocyte.Fraction, na.rm = TRUE),color="black", linetype = 2,size=HLINE_SIZE)+
+  stat_compare_means(method="wilcox.test", ref.group =".all.",label="..p.signif..", size=STAT_COMPARE_SIZE, hide.ns = TRUE)+
+  theme_classic()+
+  labs(x="Subtype", y="Leukocyte Fraction")
+subplot_H <- my_theme_without_x(ov_LF_plot)
+subplot_H
+```
+
+If you want as separate figures
+```{r}
+setwd("C:\\Users\\thoma\\Desktop\\TNBC_project\\figures")
+
+graphs <- list(subplot_A, subplot_B, subplot_C, subplot_D, subplot_E, subplot_F, subplot_G, subplot_H)
+
+save_plot_list(graphs)
+
+ ab_legend <- get_legend(subplot_B+ theme(legend.position="right", legend.key.size = unit(2, "cm"), legend.title = element_text(face="bold",size=FONTSIZE-20, color="black"), legend.text = element_text(face="bold",size=FONTSIZE-20, color="black")))
+ggsave(ab_legend, filename = "legend_file.png")
+getwd()
+
+
+```
+
+If you want as cowplot: 
+
+```{r, warning=FALSE}
+# setwd(FIGURE_IMAGE_WD)
+
+# 
+# ab <- cowplot::plot_grid(subplot_A, subplot_B, ab_legend, labels=c("A","B"), nrow=1, label_size=LABELSIZE, scale=COWPLOT_SCALE)
+# 
+# 
+# cde <- 
+#   cowplot::plot_grid(subplot_C, subplot_D , subplot_E, labels=c("C","D", "E"), nrow=1, ncol=3, label_size=LABELSIZE,  scale=COWPLOT_SCALE)
+# fdg <- cowplot::plot_grid(subplot_F, subplot_G , subplot_H, labels=c("F","G", "H"), nrow=1, ncol=3, label_size=LABELSIZE,  scale=COWPLOT_SCALE)
+# combined <- cowplot::plot_grid(ab, cde, fdg, nrow=3)
+# cowplot::save_plot("fig5.png", combined, base_height=46, base_aspect_ratio = 1.2, limitsize=FALSE)
+```
+
+
