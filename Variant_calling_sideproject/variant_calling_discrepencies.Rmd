@@ -1,0 +1,144 @@
+---
+title: "Untitled"
+author: "Tom Davis"
+date: "June 14, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# TCGA Variant calling 
+
+
+## a smidge of background
+
+Cancer is a disease of the genome. Given the genome sequences of an indivduals normal tissue and their tumor, we want to tell what went wrong: What particular mutations are present in patients tumor but not their normal sequence? Our interest is not mearly intellectual. A tumors mutational landscape may have implications on patient prognosis and on the best course of treatment. 
+
+There are many somatic variant calling tools available to answer the above question. These tools generally take as input tumor-normal matched sequence pair, the mutations unique to the tumor (Callers generally focus on single nuceotide polymorphisms or SNPs, and insertions and deletions or INDELS). You can read more about available tools and pipelines [here](https://www.nature.com/articles/ncomms10001), and [here](https://www.sciencedirect.com/science/article/pii/S2001037017300946)
+
+
+The largest repository of tumor genomics information is The Cancer Genome Atlas (TCGA), which contains OMICS data for 33,000 cases. Each TCGA sample is subject to four variant calling pipelines, which ["are representative of the most reliable callers currently available"](https://gdc.cancer.gov/content/variant-calling-gdc). Each pipeline is based on a different caller (Mutect, Varscan2, SomaticSniper, and -- you can read about all the gory pipeline details [here](https://docs.gdc.cancer.gov/Data/Bioinformatics_Pipelines/DNA_Seq_Variant_Calling_Pipeline/#somatic-variant-calling-workflow).
+
+Suprisingly, the results of these four pipelines show relatively little consistency. I downloaded somatic MAF files for each pipeline (which have SNP and indel calls), and made this venn diagram [venn](https://cran.r-project.org/web/packages/venn/index.html)) of all the calls for the 1100 or so BRCA samples on TCGA:
+
+![test](breast_venn.tiff)
+
+
+As you can see, only about 44 percent of calls were made by all pipelines. I'd like to dive into this data more, and see why somatic variant calling is so difficult, and what factors cause callers to struggle. I'm focusing primarily on breast cancer because, frankly, that's the data I work with most frequently. 
+
+## tidying up the data
+
+lets load in the MAF files. They're fairly large
+```{r}
+library(tidyverse)
+library(purrr)
+library(plyr)
+library(testthat)
+library(corrplot)
+library(ggpubr)
+```
+
+
+```{r}
+read.table.with.name <- function(df.name, levels, ...){
+  #read in df table, with name of file as factor
+  df <- read.table(df.name, ...)
+  df$caller <- factor(df.name, levels=levels)
+  df
+}
+
+IOU <- function(...){ 
+  #find size of intersection over union for arbitrary # of vectors
+  args <- list(...)
+  intersect_ <- reduce(args, intersect)
+  union_ <- reduce(args, union)
+  return(length(intersect_)/length(union_))
+}
+
+
+expect_equal(IOU(rep(1:5, 6)), 1)
+expect_equal(IOU(c(1,2,3), c(2,3,4)), .5)
+#seems to work
+```
+
+
+```{r}
+setwd("C:\\Users\\thoma\\git\\breast_data\\slimmed")
+
+#has seperate datasets for 4 different callers
+maf_files <- list.files()
+
+breast_df_list <- map(maf_files, read.table.with.name, maf_files, skip=4, header=TRUE, stringsAsFactors=FALSE)
+breast_df <- do.call(rbind, breast_df_list) 
+#here's what the dataset looks like 
+head(breast_df)
+
+cibersort <- read.csv("../5EH_cibersort_data.csv", stringsAsFactors = FALSE) %>% filter(TCGA.Study=="BRCA")
+
+clinical <- read.table("../clinical.tsv", sep= "\t", header=TRUE, stringsAsFactors = FALSE)
+#clinical data and immunological data about each tumor-- the tumor instrinsic factors we will use to explain the varianbility we see in IOU
+```
+lets generate our IOU data
+
+```{r}
+
+IOU_df <- breast_df %>% 
+  group_by(Tumor_Sample_Barcode) %>% 
+  do(caller_vector=.$caller, start_position_vector=.$Start_Position) %>% ungroup %>% 
+  dplyr::mutate(start_list = map2(.x = start_position_vector, .y = caller_vector, .f = ~ split(x = .x, f = .y))) %>% mutate(IOU= map_dbl(.x = .$start_list, .f = ~do.call(IOU, .x))) %>% 
+  select(IOU, Tumor_Sample_Barcode)
+#associate each tumor sample with a list of numeric vectors called start_list. Each numeric vector in start_list has positions of variants for a given caller. Calculate the intersection over union for the four vectors
+head(IOU_df)
+```
+
+now we look at IOU and tumor properties, including purity and heterogeneity
+```{r}
+IOU_with_cibersort <- IOU_df %>% 
+  mutate(Tumor_Sample_Barcode= substr(Tumor_Sample_Barcode, 1,12)) %>% inner_join(cibersort, by=c("Tumor_Sample_Barcode"= "TCGA.Participant.Barcode")) %>% 
+  dplyr::select(Tumor_Sample_Barcode, IOU, Stromal.Fraction, Intratumor.Heterogeneity)
+
+
+IOU_with_cibersort %>%  select(-Tumor_Sample_Barcode) %>% cor(use = "complete.obs", method = "spearman") %>% corrplot()
+
+#IOU and stromal fraction--the nontumor component of the tumor. 
+
+IOU_with_cibersort %>% ggplot(aes(x=Stromal.Fraction, y= IOU))+geom_point()+
+  ggpubr::stat_cor(method = "spearman", label.x = .7)+theme_classic()
+#higher stromal content (and thus lower tumor purity) correlates with a significant decrease in caller consensus
+
+
+IOU_with_cibersort %>% ggplot(aes(x=Intratumor.Heterogeneity, y= IOU))+geom_point()+
+  ggpubr::stat_cor(method = "spearman", label.x = .7)+theme_classic()
+#higher tumor heterogeneity correlates with a significant decrease in caller consensus
+
+```
+
+now we can look at IOU and clinical information. Are there particular case types variant callers perform worse on. 
+```{r}
+IOU_with_clinical <- IOU_with_cibersort %>% left_join(clinical, by=c("Tumor_Sample_Barcode"="submitter_id"))
+IOU_with_clinical %>% group_by(race) %>% dplyr::summarize(mean(IOU, na.rm=TRUE), n=n())
+IOU_with_clinical %>% group_by(primary_diagnosis) %>% dplyr::summarize(mean(IOU, na.rm=TRUE), n=n())
+IOU_with_clinical[IOU_with_clinical== "not reported"] <- NA
+
+IOU_with_clinical %>% filter(!is.na(primary_diagnosis), grepl("stage", primary_diagnosis)) %>% ggplot(aes(x=primary_diagnosis, y=IOU))+geom_boxplot()+geom_point()
+#suprisingly consistent across stages
+
+
+IOU_with_clinical  <- IOU_with_clinical %>% dplyr::mutate(days_to_birth=as.numeric(days_to_birth)) %>%
+  filter(days_to_birth < 0)
+
+IOU_with_clinical%>% 
+  ggplot(aes(x=days_to_birth, y=IOU))+geom_point()
+
+cor.test(IOU_with_clinical$IOU, IOU_with_clinical$days_to_birth)
+```
+
+
+
+
+
+
+
+
