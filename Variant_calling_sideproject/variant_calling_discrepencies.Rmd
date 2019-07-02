@@ -23,15 +23,14 @@ The largest repository of tumor genomics information is The Cancer Genome Atlas 
 
 Suprisingly, the results of these four pipelines show relatively little consistency. I downloaded somatic MAF files for each pipeline (which have SNP and indel calls), and made this venn diagram [venn](https://cran.r-project.org/web/packages/venn/index.html)) of all the calls for the 1100 or so BRCA samples on TCGA:
 
-![test](breast_venn.tiff)
-
+###TODO
 
 As you can see, only about 44 percent of calls were made by all pipelines. I'd like to dive into this data more, and see why somatic variant calling is so difficult, and what factors cause callers to struggle. I'm focusing primarily on breast cancer because, frankly, that's the data I work with most frequently. 
 
 ## tidying up the data
 
 lets load in the MAF files. They're fairly large
-```{r}
+```{r, warning=FALSE}
 library(tidyverse)
 library(purrr)
 library(plyr)
